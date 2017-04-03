@@ -70,6 +70,7 @@ import org.xnio.FutureResult;
 import org.xnio.IoFuture;
 import org.xnio.IoUtils;
 import org.xnio.OptionMap;
+import org.xnio.Options;
 
 /**
  * Test that the channel {@link CloseHandler}s are invoked when the channel is closed for whatever reasons
@@ -130,7 +131,7 @@ public class RemoteChannelCloseTest {
         IoFuture<Connection> futureConnection = AuthenticationContext.empty().with(MatchRule.ALL, AuthenticationConfiguration.EMPTY.useName("bob").usePassword("pass").allowSaslMechanisms("SCRAM-SHA-256")).run(new PrivilegedAction<IoFuture<Connection>>() {
             public IoFuture<Connection> run() {
                 try {
-                    return endpoint.connect(new URI("remote://localhost:30123"), OptionMap.EMPTY);
+                    return endpoint.connect(new URI("remote://localhost:30123"), OptionMap.create(Options.SSL_STARTTLS, Boolean.FALSE, Options.SSL_ENABLED, Boolean.FALSE));
                 } catch (URISyntaxException e) {
                     throw new RuntimeException(e);
                 }

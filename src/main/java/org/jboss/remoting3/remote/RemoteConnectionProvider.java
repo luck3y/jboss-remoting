@@ -90,7 +90,8 @@ class RemoteConnectionProvider extends AbstractHandleableCloseable<ConnectionPro
     private final XnioWorker xnioWorker;
     private final ConnectionProviderContext connectionProviderContext;
     private final boolean sslRequired;
-    private final boolean sslEnabled;
+    private boolean sslEnabled;
+    private final boolean sslStartTls;
     private final Collection<Cancellable> pendingInboundConnections = Collections.synchronizedSet(new HashSet<Cancellable>());
     private final Set<RemoteConnectionHandler> handlers = Collections.synchronizedSet(new HashSet<RemoteConnectionHandler>());
     private final MBeanServer server;
@@ -99,7 +100,9 @@ class RemoteConnectionProvider extends AbstractHandleableCloseable<ConnectionPro
     RemoteConnectionProvider(final OptionMap optionMap, final ConnectionProviderContext connectionProviderContext) throws IOException {
         super(connectionProviderContext.getExecutor());
         sslRequired = optionMap.get(Options.SECURE, false);
-        sslEnabled = optionMap.get(Options.SSL_ENABLED, true);
+        sslEnabled = optionMap.get(Options.SSL_ENABLED, false) || sslRequired;
+        sslStartTls = optionMap.get(Options.SSL_STARTTLS, false);
+
         xnioWorker = connectionProviderContext.getXnioWorker();
         this.connectionProviderContext = connectionProviderContext;
         MBeanServer server = null;
@@ -165,7 +168,12 @@ class RemoteConnectionProvider extends AbstractHandleableCloseable<ConnectionPro
         });
         final IoFuture<ConnectionHandlerFactory> returnedFuture = cancellableResult.getIoFuture();
         returnedFuture.addNotifier(IoUtils.<ConnectionHandlerFactory>resultNotifier(), result);
-        final boolean useSsl = sslRequired || sslEnabled && connectOptions.get(Options.SSL_ENABLED, true);
+
+        final boolean cnxSsl = connectOptions.get(Options.SECURE, sslRequired);
+        final boolean cnxSslEnabled = connectOptions.get(Options.SSL_ENABLED, sslEnabled) | cnxSsl;
+        //final boolean cnxStartTls = connectOptions.get(Options.SSL_STARTTLS, sslStartTls);
+
+        final boolean useSsl = sslRequired || cnxSslEnabled;
         final ChannelListener<StreamConnection> openListener = new ChannelListener<StreamConnection>() {
             public void handleEvent(final StreamConnection connection) {
                 try {
@@ -258,7 +266,10 @@ class RemoteConnectionProvider extends AbstractHandleableCloseable<ConnectionPro
                 final JsseSslConnection sslConnection = new JsseSslConnection(streamConnection, engine);
                 // Required in order for the SSLConnection to be properly closed.
                 streamConnection.getCloseSetter().set(channel -> safeClose(sslConnection));
-                if (sslRequired || ! connectOptions.get(Options.SSL_STARTTLS, false)) try {
+                final boolean cnxStartTls = connectOptions.get(Options.SSL_STARTTLS, sslStartTls);
+                final boolean cnxSecure = connectOptions.get(Options.SECURE, sslRequired) || sslRequired;
+                final boolean cnxSslEnabled = connectOptions.get(Options.SSL_ENABLED, sslEnabled) || cnxSecure;
+                if ((cnxSecure || cnxSslEnabled) && ! cnxStartTls) try {
                     sslConnection.startHandshake();
                 } catch (IOException e) {
                     result.setException(new IOException(e));
@@ -312,8 +323,14 @@ class RemoteConnectionProvider extends AbstractHandleableCloseable<ConnectionPro
             Assert.checkNotNullParam("optionMap", optionMap);
             Assert.checkNotNullParam("saslAuthenticationFactory", saslAuthenticationFactory);
             final AcceptingChannel<StreamConnection> result;
-            // SSL_ENABLED only defaults to true when sslEnabled is set
-            if (sslContext != null && (sslRequired || sslEnabled && optionMap.get(Options.SSL_ENABLED, true))) {
+
+            // SSL_ENABLED is set if STARTTLS is used (though the handshake doesn't take place until later,
+            // or SECURE is enabled. If STARTTLS is not used, and SSL is enabled, the handshake takes place immediately.
+            final boolean serverSslRequired = optionMap.get(Options.SECURE, sslRequired) || sslRequired;
+            final boolean serverSslEnabled = optionMap.get(Options.SSL_ENABLED, sslEnabled) || serverSslRequired;
+            final boolean serverSslStartTls = optionMap.get(Options.SSL_STARTTLS, sslStartTls);
+
+            if (sslContext != null && (serverSslRequired || serverSslEnabled || serverSslStartTls)) {
                 result = xnioWorker.createStreamConnectionServer(bindAddress, channel -> {
                     final StreamConnection streamConnection = acceptAndConfigure(channel);
                     if (streamConnection == null) return;
@@ -331,8 +348,12 @@ class RemoteConnectionProvider extends AbstractHandleableCloseable<ConnectionPro
                     engine = sslContext.createSSLEngine(realHost, realPort);
                     engine.setUseClientMode(false);
                     final JsseSslConnection sslConnection = new JsseSslConnection(streamConnection, engine);
-                    if (sslRequired || ! optionMap.get(Options.SSL_STARTTLS, false)) try {
-                        sslConnection.startHandshake();
+                    try {
+                        if (optionMap.contains(Options.SSL_CLIENT_AUTH_MODE))
+                            sslConnection.setOption(Options.SSL_CLIENT_AUTH_MODE, optionMap.get(Options.SSL_CLIENT_AUTH_MODE));
+                        if ((serverSslRequired || serverSslEnabled) && !serverSslStartTls) {
+                            sslConnection.startHandshake();
+                        }
                     } catch (IOException e) {
                         safeClose(sslConnection);
                         log.failedToAccept(e);

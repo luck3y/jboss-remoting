@@ -39,7 +39,6 @@ import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TestName;
@@ -142,7 +141,6 @@ public class TimeOutConnectionTestCase {
     }
 
     @Test
-    @Ignore
     public void testSslEnabled() throws Exception {
         SslHelper.setKeyStoreAndTrustStore();
         doTest(OptionMap.create(Options.SSL_ENABLED, Boolean.TRUE));

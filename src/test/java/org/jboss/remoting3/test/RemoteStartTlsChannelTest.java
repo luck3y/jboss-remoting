@@ -22,8 +22,6 @@
 
 package org.jboss.remoting3.test;
 
-import static org.junit.Assert.assertNotNull;
-
 import java.io.Closeable;
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -33,7 +31,6 @@ import java.security.NoSuchAlgorithmException;
 import java.security.NoSuchProviderException;
 import java.security.PrivilegedAction;
 import java.security.spec.InvalidKeySpecException;
-
 import javax.net.ssl.SSLContext;
 import javax.security.sasl.SaslServerFactory;
 
@@ -66,13 +63,15 @@ import org.xnio.OptionMap;
 import org.xnio.Options;
 import org.xnio.Sequence;
 
+import static org.junit.Assert.assertNotNull;
+
 /**
  * Test for remote channel communication with SSL enabled.
  *
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
  * @author <a href="mailto:flavia.rainone@jboss.com">Flavia Rainone</a>
  */
-public final class RemoteSslChannelTest extends ChannelTestBase {
+public final class RemoteStartTlsChannelTest extends ChannelTestBase {
     protected static Endpoint endpoint;
     private static Closeable streamServer;
     private Connection connection;
@@ -82,7 +81,7 @@ public final class RemoteSslChannelTest extends ChannelTestBase {
     public static void create() throws IOException, NoSuchProviderException, NoSuchAlgorithmException, InvalidKeySpecException {
         SslHelper.setKeyStoreAndTrustStore();
         endpoint = Endpoint.builder().setEndpointName("test").build();
-        NetworkServerProvider networkServerProvider = endpoint.getConnectionProviderInterface("remote", NetworkServerProvider.class);
+        NetworkServerProvider networkServerProvider = endpoint.getConnectionProviderInterface("remote+tls", NetworkServerProvider.class);
         final SecurityDomain.Builder domainBuilder = SecurityDomain.builder();
         final SimpleMapBackedSecurityRealm mainRealm = new SimpleMapBackedSecurityRealm();
         domainBuilder.addRealm("mainRealm", mainRealm).build();
@@ -90,22 +89,15 @@ public final class RemoteSslChannelTest extends ChannelTestBase {
         domainBuilder.setPermissionMapper((permissionMappable, roles) -> PermissionVerifier.ALL);
         final PasswordFactory passwordFactory = PasswordFactory.getInstance("clear");
         mainRealm.setPasswordMap("bob", passwordFactory.generatePassword(new ClearPasswordSpec("pass".toCharArray())));
-        final SaslServerFactory saslServerFactory = new ServiceLoaderSaslServerFactory(RemoteSslChannelTest.class.getClassLoader());
+        final SaslServerFactory saslServerFactory = new ServiceLoaderSaslServerFactory(RemoteStartTlsChannelTest.class.getClassLoader());
         final SaslAuthenticationFactory.Builder builder = SaslAuthenticationFactory.builder();
         builder.setSecurityDomain(domainBuilder.build());
         builder.setFactory(saslServerFactory);
         builder.setMechanismConfigurationSelector(mechanismInformation -> SaslMechanismInformation.Names.SCRAM_SHA_256.equals(mechanismInformation.getMechanismName()) ? MechanismConfiguration.EMPTY : null);
         final SaslAuthenticationFactory saslAuthenticationFactory = builder.build();
 
-        OptionMap.Builder serverOptionsBuilder = OptionMap.builder();
-        serverOptionsBuilder.set(Options.SECURE, Boolean.TRUE);
-        serverOptionsBuilder.set(Options.SSL_STARTTLS, Boolean.FALSE);
-        serverOptionsBuilder.set(Options.SASL_MECHANISMS, Sequence.of("CRAM-MD5"));
-
         streamServer = networkServerProvider.createServer(new InetSocketAddress("localhost", 30123),
-                serverOptionsBuilder.getMap(), saslAuthenticationFactory, SSLContext.getDefault());
-
-
+                OptionMap.create(Options.SASL_MECHANISMS, Sequence.of("CRAM-MD5")), saslAuthenticationFactory, SSLContext.getDefault());
     }
 
     @Before
@@ -122,7 +114,7 @@ public final class RemoteSslChannelTest extends ChannelTestBase {
         IoFuture<Connection> futureConnection = AuthenticationContext.empty().with(MatchRule.ALL, AuthenticationConfiguration.EMPTY.useName("bob").usePassword("pass")).run(new PrivilegedAction<IoFuture<Connection>>() {
             public IoFuture<Connection> run() {
                 try {
-                    return endpoint.connect(new URI("remote://localhost:30123"), OptionMap.create(Options.SECURE, Boolean.TRUE, Options.SSL_STARTTLS, Boolean.FALSE));
+                    return endpoint.connect(new URI("remote+tls://localhost:30123"), OptionMap.EMPTY);
                 } catch (URISyntaxException e) {
                     throw new RuntimeException(e);
                 }
@@ -143,8 +135,6 @@ public final class RemoteSslChannelTest extends ChannelTestBase {
         IoUtils.safeClose(recvChannel);
         IoUtils.safeClose(connection);
         serviceRegistration.close();
-        System.gc();
-        System.runFinalization();
     }
 
     @AfterClass

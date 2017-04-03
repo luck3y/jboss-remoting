@@ -25,6 +25,7 @@ package org.jboss.remoting3.test;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.fail;
+import static org.wildfly.common.Assert.assertFalse;
 import static org.xnio.IoUtils.safeClose;
 
 import java.io.Closeable;
@@ -33,6 +34,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.security.PrivilegedAction;
+import java.security.Security;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
@@ -65,6 +67,7 @@ import org.wildfly.security.sasl.util.ServiceLoaderSaslServerFactory;
 import org.xnio.FutureResult;
 import org.xnio.IoFuture;
 import org.xnio.OptionMap;
+import org.xnio.Options;
 
 /**
  * Test for remote channel communication.
@@ -94,7 +97,7 @@ public final class RemoteChannelTest extends ChannelTestBase {
         builder.setFactory(saslServerFactory);
         builder.setMechanismConfigurationSelector(mechanismInformation -> SaslMechanismInformation.Names.SCRAM_SHA_256.equals(mechanismInformation.getMechanismName()) ? MechanismConfiguration.EMPTY : null);
         final SaslAuthenticationFactory saslAuthenticationFactory = builder.build();
-        streamServer = networkServerProvider.createServer(new InetSocketAddress("localhost", 30123), OptionMap.EMPTY, saslAuthenticationFactory, SSLContext.getDefault());
+        streamServer = networkServerProvider.createServer(new InetSocketAddress("localhost", 30123), OptionMap.create(Options.SSL_STARTTLS, Boolean.FALSE, Options.SSL_ENABLED, Boolean.FALSE), saslAuthenticationFactory, SSLContext.getDefault());
     }
 
     @Before
@@ -111,7 +114,7 @@ public final class RemoteChannelTest extends ChannelTestBase {
         IoFuture<Connection> futureConnection = AuthenticationContext.empty().with(MatchRule.ALL, AuthenticationConfiguration.EMPTY.useName("bob").usePassword("pass").allowSaslMechanisms("SCRAM-SHA-256")).run(new PrivilegedAction<IoFuture<Connection>>() {
             public IoFuture<Connection> run() {
                 try {
-                    return endpoint.connect(new URI("remote://localhost:30123"), OptionMap.EMPTY);
+                    return endpoint.connect(new URI("remote://localhost:30123"), OptionMap.create(Options.SSL_ENABLED, Boolean.FALSE, Options.SSL_STARTTLS, Boolean.FALSE));
                 } catch (URISyntaxException e) {
                     throw new RuntimeException(e);
                 }
@@ -133,17 +136,27 @@ public final class RemoteChannelTest extends ChannelTestBase {
         safeClose(recvChannel);
         safeClose(connection);
         serviceRegistration.close();
+
+        assertFalse(sendChannel.isOpen());
+        assertFalse(recvChannel.isOpen());
+        assertFalse(connection.isOpen());
+        assertFalse(serviceRegistration.isOpen());
     }
 
     @AfterClass
     public static void destroy() throws IOException, InterruptedException {
         safeClose(streamServer);
         safeClose(endpoint);
+        assertFalse(endpoint.isOpen());
+        System.gc();
+        System.runFinalization();
+        System.out.println("xxx after");
+        Thread.sleep(100);
     }
 
     @Test
     public void testRefused() throws Exception {
-        IoFuture<Connection> futureConnection = endpoint.connect(new URI("remote://localhost:33123"), OptionMap.EMPTY);
+        IoFuture<Connection> futureConnection = endpoint.connect(new URI("remote://localhost:33123"), OptionMap.create(Options.SSL_ENABLED, Boolean.FALSE));
         try {
             futureConnection.awaitInterruptibly(2L, TimeUnit.SECONDS);
             if (futureConnection.getStatus() == IoFuture.Status.WAITING) {

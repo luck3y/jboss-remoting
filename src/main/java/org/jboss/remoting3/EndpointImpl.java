@@ -197,8 +197,8 @@ final class EndpointImpl extends AbstractHandleableCloseable<Endpoint> implement
             }
             // remote (SSL is explicit in URL)
             final RemoteConnectionProviderFactory remoteConnectionProviderFactory = new RemoteConnectionProviderFactory();
-            endpoint.addConnectionProvider("remote", remoteConnectionProviderFactory, OptionMap.create(Options.SSL_ENABLED, Boolean.FALSE));
-            endpoint.addConnectionProvider("remote+tls", remoteConnectionProviderFactory, OptionMap.create(Options.SECURE, Boolean.TRUE));
+            endpoint.addConnectionProvider("remote", remoteConnectionProviderFactory, OptionMap.create(Options.SSL_STARTTLS, Boolean.TRUE));
+            endpoint.addConnectionProvider("remote+tls", remoteConnectionProviderFactory, OptionMap.create(Options.SECURE, Boolean.TRUE, Options.SSL_STARTTLS, Boolean.TRUE));
             // old (SSL is config-based)
             endpoint.addConnectionProvider("remoting", remoteConnectionProviderFactory, OptionMap.create(Options.SSL_ENABLED, Boolean.TRUE));
             // http - SSL is handled by the HTTP layer
@@ -434,6 +434,8 @@ final class EndpointImpl extends AbstractHandleableCloseable<Endpoint> implement
     IoFuture<Connection> connect(final URI destination, final SocketAddress bindAddress, final OptionMap connectOptions, final AuthenticationConfiguration configuration, final UnaryOperator<SaslClientFactory> saslClientFactoryOperator, final SSLContext sslContext) {
         Assert.checkNotNullParam("destination", destination);
         Assert.checkNotNullParam("connectOptions", connectOptions);
+        final String scheme = destination.getScheme();
+        // should this use the scheme instead of DEFAULT_SASL_PROTOCOL?
         final String protocol = connectOptions.contains(RemotingOptions.SASL_PROTOCOL) ? connectOptions.get(RemotingOptions.SASL_PROTOCOL) : RemotingOptions.DEFAULT_SASL_PROTOCOL;
         UnaryOperator<SaslClientFactory> factoryOperator = PrivilegedSaslClientFactory::new;
         factoryOperator = and(factoryOperator, factory -> new ProtocolSaslClientFactory(factory, protocol));
@@ -446,7 +448,6 @@ final class EndpointImpl extends AbstractHandleableCloseable<Endpoint> implement
         if (sm != null) {
             sm.checkPermission(RemotingPermission.CONNECT);
         }
-        final String scheme = destination.getScheme();
         synchronized (connectionLock) {
             boolean ok = false;
             try {
