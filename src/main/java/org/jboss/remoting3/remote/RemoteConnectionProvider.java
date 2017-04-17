@@ -65,6 +65,8 @@ import org.xnio.XnioWorker;
 import org.xnio.channels.AcceptingChannel;
 import org.xnio.channels.SslChannel;
 import org.xnio.ssl.JsseSslConnection;
+import org.xnio.ssl.JsseSslStreamConnection;
+import org.xnio.ssl.JsseXnioSsl;
 import org.xnio.ssl.SslConnection;
 
 /**
@@ -255,7 +257,13 @@ class RemoteConnectionProvider extends AbstractHandleableCloseable<ConnectionPro
                 final SSLEngine engine;
                 engine = sslContext.createSSLEngine(realHost, realPort);
                 engine.setUseClientMode(true);
-                final JsseSslConnection sslConnection = new JsseSslConnection(streamConnection, engine);
+
+                SslConnection sslConnection;
+                if (JsseXnioSsl.NEW_IMPL) {
+                    sslConnection = new JsseSslConnection(streamConnection, engine);
+                } else {
+                    sslConnection = new JsseSslStreamConnection(streamConnection, engine, connectOptions.get(Options.SSL_STARTTLS, false));
+                }
                 // Required in order for the SSLConnection to be properly closed.
                 streamConnection.getCloseSetter().set(channel -> safeClose(sslConnection));
                 if (sslRequired || ! connectOptions.get(Options.SSL_STARTTLS, false)) try {
@@ -330,7 +338,12 @@ class RemoteConnectionProvider extends AbstractHandleableCloseable<ConnectionPro
                     final SSLEngine engine;
                     engine = sslContext.createSSLEngine(realHost, realPort);
                     engine.setUseClientMode(false);
-                    final JsseSslConnection sslConnection = new JsseSslConnection(streamConnection, engine);
+                    SslConnection sslConnection;
+                    if (JsseXnioSsl.NEW_IMPL) {
+                        sslConnection = new JsseSslConnection(streamConnection, engine);
+                    } else {
+                        sslConnection = new JsseSslStreamConnection(streamConnection, engine, optionMap.get(Options.SSL_STARTTLS, false));
+                    }
                     if (sslRequired || ! optionMap.get(Options.SSL_STARTTLS, false)) try {
                         sslConnection.startHandshake();
                     } catch (IOException e) {
